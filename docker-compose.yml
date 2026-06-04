@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  ollama:
+    container_name: ollama_service
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  # Servicio auxiliar para descargar el modelo automáticamente
+  ollama-model-puller:
+    image: curlimages/curl:latest
+    container_name: ollama_model_puller
+    depends_on:
+      - ollama
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Esperando a que Ollama inicie...';
+      while ! curl -s http://ollama:11434/api/tags > /dev/null; do sleep 2; done;
+      echo 'Ollama activo. Verificando/Descargando Qwen 2.5 (1.5B)...';
+      curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"qwen2.5:1.5b\"}';
+      echo 'Modelo Qwen 2.5 1.5B listo!';
+      "
+
+volumes:
+  ollama_data:

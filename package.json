@@ -1,0 +1,16 @@
+{
+  "name": "chatbot-ity-mvp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MVP de chatbot con panel admin, SQLite y conexión a Ollama",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "sql.js": "^1.12.0"
+  }
+}

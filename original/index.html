@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chatbot Bienestar Laboral — ITY.DIGITAL</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <header>
+    <div class="logo">IA</div>
+    <div>
+      <h1>Chatbot de Bienestar Laboral</h1>
+      <p>ITY.DIGITAL · Análisis multidimensional · 12 variables</p>
+    </div>
+    <span class="badge">Prototipo v2</span>
+  </header>
+
+  <div class="app">
+
+    <!-- ── PANEL DE CHAT ── -->
+    <div class="chat-panel">
+      <div class="chat-header">
+        <div class="bot-av">IA</div>
+        <div>
+          <div class="chat-title">Asistente de Bienestar</div>
+          <div class="chat-sub">Sesión anónima y confidencial</div>
+        </div>
+        <div class="progress-wrap">
+          <span class="progress-label" id="prog-label">0 / 12</span>
+          <div class="progress-bar">
+            <div class="progress-fill" id="prog-fill" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="input-row">
+        <input type="text" id="userInput" placeholder="Escribe aquí o usa los botones de respuesta..." />
+        <button class="send-btn" onclick="sendMsg()">Enviar</button>
+      </div>
+    </div>
+
+    <!-- ── SIDEBAR ── -->
+    <div class="sidebar">
+
+      <div class="card">
+        <div class="card-title">Puntuación de sentimiento</div>
+        <div class="gauge-wrap">
+          <div class="gauge-score" id="g-score">—</div>
+          <div class="gauge-label" id="g-label">Esperando respuestas...</div>
+          <div class="gauge-bar">
+            <div class="gauge-thumb" id="g-thumb" style="left:calc(50% - 6px)"></div>
+          </div>
+          <div class="gauge-scale-labels">
+            <span>Crítico</span><span>Negativo</span><span>Neutral</span><span>Positivo</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Dimensiones de bienestar</div>
+        <div id="dim-bars">
+          <div class="dim-row"><span class="dim-label">Satisfacción</span><div class="dim-track"><div class="dim-fill" id="d-sat" style="width:0%;background:#185fa5"></div></div><span class="dim-val" id="dv-sat">—</span></div>
+          <div class="dim-row"><span class="dim-label">Estrés</span><div class="dim-track"><div class="dim-fill" id="d-str" style="width:0%;background:#E24B4A"></div></div><span class="dim-val" id="dv-str">—</span></div>
+          <div class="dim-row"><span class="dim-label">Liderazgo</span><div class="dim-track"><div class="dim-fill" id="d-lid" style="width:0%;background:#3b6d11"></div></div><span class="dim-val" id="dv-lid">—</span></div>
+          <div class="dim-row"><span class="dim-label">Crecimiento</span><div class="dim-track"><div class="dim-fill" id="d-cre" style="width:0%;background:#854f0b"></div></div><span class="dim-val" id="dv-cre">—</span></div>
+          <div class="dim-row"><span class="dim-label">Compañeros</span><div class="dim-track"><div class="dim-fill" id="d-tea" style="width:0%;background:#3c3489"></div></div><span class="dim-val" id="dv-tea">—</span></div>
+          <div class="dim-row"><span class="dim-label">Remuneración</span><div class="dim-track"><div class="dim-fill" id="d-rem" style="width:0%;background:#639922"></div></div><span class="dim-val" id="dv-rem">—</span></div>
+          <div class="dim-row"><span class="dim-label">Carga laboral</span><div class="dim-track"><div class="dim-fill" id="d-wl" style="width:0%;background:#D85A30"></div></div><span class="dim-val" id="dv-wl">—</span></div>
+          <div class="dim-row"><span class="dim-label">Balance vida</span><div class="dim-track"><div class="dim-fill" id="d-bal" style="width:0%;background:#178877"></div></div><span class="dim-val" id="dv-bal">—</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Señales de alerta detectadas</div>
+        <div id="flags-list">
+          <div class="empty-msg">Sin señales aún.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Panel RRHH</div>
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">Sesiones</div><div class="metric-val" id="m-sessions">0</div></div>
+          <div class="metric"><div class="metric-label">Riesgo alto</div><div class="metric-val red" id="m-risk">0</div></div>
+          <div class="metric"><div class="metric-label">Burnout</div><div class="metric-val purple" id="m-burnout">0</div></div>
+          <div class="metric"><div class="metric-label">Sat. prom.</div><div class="metric-val" id="m-sat">—</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Alertas generadas</div>
+        <div id="alerts-list">
+          <div class="empty-msg">Sin alertas aún.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── TABLA DE REGISTRO ── -->
+  <div id="log-section">
+    <h2>Registro de sesiones</h2>
+    <div style="overflow-x:auto">
+      <table id="log-table">
+        <thead>
+          <tr>
+            <th>#</th><th>Antigüedad</th><th>Depto</th>
+            <th>Sat.</th><th>Estrés</th><th>Liderazgo</th><th>Crecimiento</th>
+            <th>Equipo</th><th>Remuneración</th><th>Carga</th><th>Balance</th>
+            <th>Intención salida</th><th>Score sent.</th>
+            <th>Dimensión crítica</th><th>Burnout</th><th>Riesgo rotación</th><th>Hora</th>
+          </tr>
+        </thead>
+        <tbody id="log-body">
+          <tr>
+            <td colspan="17" class="empty-msg" style="text-align:center;padding:12px">
+              Completa una sesión para ver el registro.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="js/flow.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+
+</body>
+</html>
