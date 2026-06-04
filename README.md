@@ -201,3 +201,35 @@ En Linux/macOS evitá `sudo`. Si usás NVM o una instalación por usuario, no de
 ## 11. Licencia y notas
 
 Proyecto MVP interno de **ITY.DIGITAL**. Usar con fines demostrativos / de bienestar laboral.
+
+---
+
+## 12. Cómo se clasifica al usuario
+
+El sistema combina **dos flujos** que alimentan un único `state.assessment` (sentimiento, dimensiones, riesgo de rotación, señales de burnout, mood):
+
+### a) Chat libre con Ollama (vista 01)
+- Cada mensaje del usuario se envía a `/api/chat` (`server.js:599`).
+- El servidor hace **dos llamadas** a Ollama:
+  1. La respuesta conversacional visible.
+  2. Una segunda llamada al mismo modelo pidiéndole únicamente un **objeto JSON** con la clasificación (`server.js:382`). La escala va de 1 (peor) a 5 (mejor) en todos los campos, con un ejemplo few-shot para que el modelo de 1.5B no confunda la dirección.
+- Si el modelo no emite JSON válido, se aplica un **fallback léxico** en el frontend (palabras clave de burnout / bienestar) para que el diagnóstico siempre se actualice.
+- La señal persistida se guarda en `messages.signal_json` y se devuelve en la respuesta JSON al frontend.
+- El frontend (`js/app.js`) la mergea con `applySignalToAssessment()`, recalcula el score con las mismas fórmulas del flujo guiado y persiste un snapshot en `diagnostic_snapshots` con `step_id = 'chat_signal'`.
+
+### b) Diagnóstico guiado de 12 pasos (vista 03)
+- Sigue funcionando como antes, con preguntas `options`, `scale` (1-5), `likert`, `multiselect` y `text_or_skip`.
+- Cada respuesta se procesa con `diagnosticRecordScore` y actualiza el mismo `state.assessment`.
+
+### Estado compartido
+- Ambos flujos escriben en `state.assessment` (en memoria).
+- La **pill de bienestar** en el header del chat muestra en vivo: `Bienestar X% · Riesgo Y · N alertas`.
+- El **panel lateral de diagnóstico** (botón "Ver diagnóstico" en el chat) muestra dimensiones, flags, mood, tags y últimos snapshots.
+- Al **cargar una sesión existente** (`loadSession`), se reprocesan todas las señales históricas para reconstruir el estado.
+
+### Tablas relevantes
+- `messages(id, session_id, role, content, created_at, signal_json)` — `signal_json` se agregó con `ALTER TABLE` seguro al iniciar.
+- `diagnostic_snapshots(id, session_id, user_id, step_id, step_label, score, burnout_risk, burnout_count, critical_dim, flow_label, flow_tone, flags_json, dims_json, responses_json, created_at)`.
+
+### Variables de entorno adicionales
+No hay nuevas; el clasificador reutiliza `OLLAMA_BASE_URL` y `OLLAMA_MODEL`. Si querés desactivar la segunda llamada, comentá el bloque `askOllamaForSignal` en `server.js:411` y el chat seguirá funcionando solo con la respuesta visible (y el fallback léxico).

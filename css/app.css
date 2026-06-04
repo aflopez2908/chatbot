@@ -1295,4 +1295,207 @@ tbody tr:hover {
   .diag-result-summary {
     grid-template-columns: 1fr;
   }
+
+  .chat-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wellness-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* =====================================================
+   Chat layout con panel lateral de diagnóstico
+   ===================================================== */
+.chat-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.chat-layout.with-side {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chat-side {
+  position: relative;
+}
+
+.wellness-panel {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+}
+
+.wellness-head h3 {
+  margin: 4px 0 8px;
+  font-size: 1.05rem;
+}
+
+.wellness-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wellness-summary article {
+  background: var(--surface-strong);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--line);
+}
+
+.wellness-summary span {
+  font-size: 0.72rem;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wellness-summary strong {
+  font-size: 1.1rem;
+  font-family: var(--font-display);
+}
+
+.wellness-section-title {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-strong);
+}
+
+.wellness-dims {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wellness-dim-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 44px;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.84rem;
+}
+
+.wellness-dim-row span {
+  color: var(--muted-strong);
+}
+
+.wellness-dim-row strong {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.wellness-dim-bar {
+  height: 6px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.wellness-dim-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--teal), var(--gold));
+  border-radius: inherit;
+  transition: width 0.4s ease;
+}
+
+.wellness-flags {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wellness-flag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  background: var(--surface-strong);
+  border-radius: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+}
+
+.wellness-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.wellness-dot.good { background: var(--teal); }
+.wellness-dot.warn { background: var(--gold); }
+.wellness-dot.danger { background: var(--red); }
+.wellness-dot.neutral { background: var(--muted); }
+
+.wellness-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wellness-tag {
+  background: var(--gold-soft);
+  color: var(--gold);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
+
+.wellness-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wellness-history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface-strong);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  border: 1px solid var(--line);
+}
+
+.wellness-history-item span {
+  color: var(--muted-strong);
+  font-size: 0.75rem;
+}
+
+.wellness-panel .micro-copy {
+  font-size: 0.78rem;
+  color: var(--muted-strong);
+  line-height: 1.4;
+}
+
+.wellness-panel .ghost-btn {
+  align-self: flex-start;
 }

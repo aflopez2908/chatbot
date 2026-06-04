@@ -447,6 +447,67 @@ async function main() {
     }
   }
 
+  async function askOllamaForSignal(userMessage, assistantReply) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const schemaHint = '{"satisfaccion":1-5,"estres":1-5,"carga":1-5,"liderazgo":1-5,"equipo":1-5,"crecimiento":1-5,"remuneracion":1-5,"balance":1-5,"intencion_salida":1-5,"comunicacion":1-5,"burnout":"ninguno|leve|moderado|severo","mood":"positivo|neutro|negativo","riesgo":"bajo|medio|alto","tags":["max8"]}';
+    const prompt = [
+      'Eres un clasificador de bienestar laboral. Recibirás el último mensaje del usuario y la respuesta del asistente.',
+      'Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin texto antes ni después, sin markdown, sin explicaciones) con este esquema exacto:',
+      schemaHint,
+      'Convención de escalas (1=peor, 5=mejor, en todos los campos numéricos):',
+      '- satisfaccion: 1=muy insatisfecho, 5=muy satisfecho',
+      '- estres: 1=muy estresado/agotado, 5=sin estrés (recuerda: 1 es el lado malo)',
+      '- carga: 1=insostenible/excesiva, 5=adecuada/ligera',
+      '- liderazgo: 1=muy mal apoyo del jefe, 5=excelente apoyo',
+      '- equipo: 1=ambiente muy negativo, 5=muy positivo',
+      '- crecimiento: 1=sin oportunidades, 5=muchas oportunidades',
+      '- remuneracion: 1=muy injusto, 5=totalmente justo',
+      '- balance: 1=sin equilibrio vida-trabajo, 5=equilibrio perfecto',
+      '- intencion_salida: 1=quiere renunciar, 5=está cómodo y no piensa irse',
+      '- comunicacion: 1=muy opaca, 5=muy clara',
+      'En "tags" incluye hasta 8 palabras clave en ESPAÑOL (ej: "insomnio", "liderazgo", "salida").',
+      '',
+      'Ejemplo de salida válida para un mensaje muy negativo ("estoy agotado, no duermo, quiero renunciar"):',
+      '{"satisfaccion":1,"estres":1,"carga":1,"liderazgo":2,"equipo":2,"crecimiento":2,"remuneracion":2,"balance":1,"intencion_salida":1,"comunicacion":2,"burnout":"severo","mood":"negativo","riesgo":"alto","tags":["insomnio","renuncia"]}',
+      '',
+      'Ejemplo de salida válida para un mensaje positivo ("estoy bien, motivado, el equipo funciona"):',
+      '{"satisfaccion":5,"estres":5,"carga":4,"liderazgo":4,"equipo":5,"crecimiento":4,"remuneracion":4,"balance":4,"intencion_salida":5,"comunicacion":4,"burnout":"ninguno","mood":"positivo","riesgo":"bajo","tags":["motivado","equipo"]}',
+      '',
+      'Último mensaje del usuario:',
+      userMessage.slice(0, 1500),
+      '',
+      'Respuesta del asistente:',
+      assistantReply.slice(0, 1500)
+    ].join('\n');
+
+    try {
+      const response = await fetch(`${ollamaBaseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: ollamaModel,
+          stream: false,
+          messages: [{ role: 'user', content: prompt }],
+          options: { temperature: 0.1, top_p: 0.9 }
+        })
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      const raw = cleanText(data?.message?.content || data?.response || '', 2000);
+      if (!raw) return null;
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) return null;
+      const parsed = JSON.parse(match[0]);
+      return sanitizeSignal(parsed);
+    } catch (_error) {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   function fallbackReply(userMessage, user) {
     const name = user?.name || 'usuario';
     return [
@@ -698,11 +759,7 @@ async function main() {
         'Respondes en español con tono claro, profesional y cálido.',
         'Si el usuario pide ayuda sobre la plataforma, explica pasos concretos.',
         'Si el usuario comparte señales de riesgo emocional o burnout, ofrece apoyo y recomienda contactar a RRHH o a un responsable de bienestar.',
-        'No inventes datos de la empresa y evita respuestas largas innecesarias.',
-        '',
-        'Adicionalmente, después de tu respuesta visible, debes incluir SIEMPRE un bloque de señal delimitado con los marcadores <<<SIGNAL>>> y <<<END>>>, con un objeto JSON válido y nada más dentro, con este esquema exacto:',
-        '{"satisfaccion":1-5,"estres":1-5,"carga":1-5,"liderazgo":1-5,"equipo":1-5,"crecimiento":1-5,"remuneracion":1-5,"balance":1-5,"intencion_salida":1-5,"comunicacion":1-5,"burnout":"ninguno|leve|moderado|severo","mood":"positivo|neutro|negativo","riesgo":"bajo|medio|alto","tags":["max8"]}',
-        'Las escalas son 1 (muy negativo) a 5 (muy positivo). El bloque de señal no debe mostrarse al usuario; el sistema lo extrae automáticamente.'
+        'No inventes datos de la empresa y evita respuestas largas innecesarias.'
       ].join('\n')
     };
 
@@ -711,9 +768,12 @@ async function main() {
     try {
       const ollamaResult = await askOllama([systemPrompt, ...history]);
       assistantMessage = ollamaResult.reply;
-      signal = ollamaResult.signal;
     } catch (_error) {
       assistantMessage = fallbackReply(userMessage, req.auth.user);
+    }
+
+    if (assistantMessage && !assistantMessage.startsWith('He recibido tu mensaje')) {
+      signal = await askOllamaForSignal(userMessage, assistantMessage);
     }
 
     const signalJson = signal ? JSON.stringify(signal) : null;

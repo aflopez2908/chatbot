@@ -22,7 +22,8 @@ const state = {
   chatMessages: [],
   assessment: null,
   draft: '',
-  chatBusy: false
+  chatBusy: false,
+  wellnessPanelOpen: false
 };
 
 const app = document.getElementById('app');
@@ -329,6 +330,122 @@ function getDiagnosticStep(stepId) {
   return DIAGNOSTIC_FLOW.find(item => item.id === stepId) || null;
 }
 
+function renderWellnessPill() {
+  const diag = state.assessment;
+  const score = diag?.sentimentScore;
+  const riskPct = diag?.riskPct ?? diagnosticComputeRotationRisk();
+  const burnoutCount = (diag?.burnoutFlags || []).length;
+  if (score === null || score === undefined) {
+    return '<span class="status-pill subtle" title="El diagnóstico se actualiza con cada mensaje">Bienestar: esperando primera señal</span>';
+  }
+  const label = diagnosticScoreToLabel(score);
+  const toneMap = { good: 'good', warn: 'warn', danger: 'danger', '': 'subtle' };
+  const tone = toneMap[label.cls] || 'subtle';
+  const riskTag = riskPct >= 65 ? 'high' : riskPct >= 35 ? 'med' : 'low';
+  const riskText = riskTag === 'high' ? 'alto' : riskTag === 'med' ? 'medio' : 'bajo';
+  return `
+    <span class="status-pill ${tone}" title="Última actualización: ${formatRelative(diag.lastSignal?.at)}">
+      Bienestar ${score}% · Riesgo ${riskText}${burnoutCount ? ` · ${burnoutCount} alerta${burnoutCount === 1 ? '' : 's'}` : ''}
+    </span>
+  `;
+}
+
+function renderWellnessPanel() {
+  const diag = state.assessment;
+  if (!diag) return '<div class="empty-state">Sin diagnóstico activo.</div>';
+  const score = diag.sentimentScore;
+  const riskPct = diag.riskPct ?? diagnosticComputeRotationRisk();
+  const flags = (diag.flags && diag.flags.length) ? diag.flags : (() => { diagnosticDetectFlags(); return diag.flags; })();
+  const burnoutCount = (diag.burnoutFlags || []).length;
+  const mood = diag.derived?.mood || diag.responses?.chat_mood || null;
+  const source = diag.lastSignal?.source || null;
+  const tags = diag.responses?.chat_tags ? diag.responses.chat_tags.split(', ') : [];
+
+  const dimLabels = {
+    sat: 'Satisfacción', str: 'Estrés', lid: 'Liderazgo',
+    cre: 'Crecimiento', tea: 'Compañeros', rem: 'Remuneración',
+    wl: 'Carga lab.', bal: 'Balance'
+  };
+
+  const dimsHtml = Object.keys(dimLabels).length
+    ? Object.entries(dimLabels).map(([key, name]) => {
+        const val = diag.dims[key];
+        const pct = val === undefined ? null : val;
+        return `
+          <div class="wellness-dim-row">
+            <span>${name}</span>
+            <div class="wellness-dim-bar"><span style="width:${pct ?? 0}%"></span></div>
+            <strong>${pct === null ? '—' : pct + '%'}</strong>
+          </div>
+        `;
+      }).join('')
+    : '<div class="empty-state">Sin dimensiones medidas todavía.</div>';
+
+  const flagsHtml = (flags || []).map(f => `
+    <div class="wellness-flag">
+      <span class="wellness-dot ${f.tone || 'neutral'}"></span>
+      <span>${escapeHtml(f.text)}</span>
+    </div>
+  `).join('') || '<div class="empty-state">Sin señales de alerta.</div>';
+
+  const history = (diag.history || []).slice(0, 5).map(item => `
+    <div class="wellness-history-item">
+      <strong>${item.label.label} · ${item.score === null ? '—' : item.score + '%'}</strong>
+      <span>${formatRelative(item.at)}</span>
+    </div>
+  `).join('') || '<div class="empty-state">Sin historial todavía.</div>';
+
+  const sourceLabel = source === 'ai' ? 'IA Ollama' : source === 'keywords' ? 'Análisis local' : source === 'history' ? 'Historial' : '—';
+
+  return `
+    <div class="wellness-panel">
+      <header class="wellness-head">
+        <p class="eyebrow">DIAGNÓSTICO EN VIVO</p>
+        <h3>Tu estado de bienestar</h3>
+        <span class="chip subtle">Fuente: ${sourceLabel}</span>
+      </header>
+
+      <div class="wellness-summary">
+        <article>
+          <span>Sentimiento</span>
+          <strong>${score === null || score === undefined ? '—' : score + '%'}</strong>
+        </article>
+        <article>
+          <span>Riesgo rotación</span>
+          <strong>${riskPct}%</strong>
+        </article>
+        <article>
+          <span>Señales</span>
+          <strong>${burnoutCount}</strong>
+        </article>
+        <article>
+          <span>Mood</span>
+          <strong>${mood || '—'}</strong>
+        </article>
+      </div>
+
+      <h4 class="wellness-section-title">Dimensiones</h4>
+      <div class="wellness-dims">${dimsHtml}</div>
+
+      <h4 class="wellness-section-title">Señales detectadas</h4>
+      <div class="wellness-flags">${flagsHtml}</div>
+
+      ${tags.length ? `
+        <h4 class="wellness-section-title">Tags recientes</h4>
+        <div class="wellness-tags">
+          ${tags.map(t => `<span class="wellness-tag">${escapeHtml(t)}</span>`).join('')}
+        </div>
+      ` : ''}
+
+      <h4 class="wellness-section-title">Última evolución</h4>
+      <div class="wellness-history">${history}</div>
+
+      <p class="micro-copy">El modelo Qwen clasifica cada mensaje del chat y se combina con un fallback léxico local. También podés completar el <strong>Diagnóstico guiado</strong> (vista 03); ambos flujos alimentan este mismo estado.</p>
+      <button class="ghost-btn" id="resetAssessmentBtn" type="button">Reiniciar diagnóstico</button>
+    </div>
+  `;
+}
+
 function diagnosticScoreToPercent(raw, max) {
   return Math.round((raw / max) * 100);
 }
@@ -511,6 +628,166 @@ function diagnosticComputeResultMessage() {
 
 function resetDiagnostic() {
   state.assessment = createDiagnosticState();
+}
+
+const SIGNAL_DIM_MAP = {
+  satisfaccion: { dim: 'sat', weight: 1.5 },
+  estres: { dim: 'str', weight: 1.3 },
+  carga: { dim: 'wl', weight: 1.2 },
+  liderazgo: { dim: 'lid', weight: 1.4 },
+  equipo: { dim: 'tea', weight: 1.0 },
+  crecimiento: { dim: 'cre', weight: 1.2 },
+  remuneracion: { dim: 'rem', weight: 1.1 },
+  balance: { dim: 'bal', weight: 1.1 },
+  intencion_salida: { dim: null, weight: 2.0 },
+  comunicacion: { dim: null, weight: 1.0 }
+};
+
+const BURNOUT_BAND_FLAGS = {
+  ninguno: [],
+  leve: ['Dificultad para concentrarme'],
+  moderado: ['Dificultad para concentrarme', 'Sensación de no poder desconectarme', 'Irritabilidad frecuente'],
+  severo: ['Dificultad para concentrarme', 'Sensación de no poder desconectarme', 'Irritabilidad frecuente', 'Insomnio o mal descanso', 'Falta de motivación o energía']
+};
+
+const RISK_FROM_BAND = { bajo: 'low', medio: 'med', alto: 'high' };
+
+function applySignalToAssessment(signal, { record = true } = {}) {
+  if (!signal || typeof signal !== 'object') return false;
+  const diag = state.assessment;
+  let applied = false;
+
+  Object.entries(SIGNAL_DIM_MAP).forEach(([key, meta]) => {
+    const raw = Number(signal[key]);
+    if (Number.isInteger(raw) && raw >= 1 && raw <= 5) {
+      diag.responses[`chat_${key}`] = raw;
+      diagnosticRecordScore(`chat_${key}`, meta.dim, raw, 5, meta.weight);
+      applied = true;
+    }
+  });
+
+  if (signal.burnout && BURNOUT_BAND_FLAGS[signal.burnout]) {
+    const set = new Set(diag.burnoutFlags);
+    BURNOUT_BAND_FLAGS[signal.burnout].forEach(flag => set.add(flag));
+    diag.burnoutFlags = Array.from(set);
+    applied = true;
+  }
+
+  if (signal.mood) {
+    diag.responses['chat_mood'] = signal.mood;
+  }
+
+  if (Array.isArray(signal.tags) && signal.tags.length) {
+    diag.responses['chat_tags'] = signal.tags.slice(0, 8).join(', ');
+  }
+
+  if (applied) {
+    diagnosticDetectFlags();
+    diag.sentimentScore = diagnosticComputeGlobalScore();
+    const riskPct = diagnosticComputeRotationRisk();
+    diag.riskPct = riskPct;
+    diag.derived = {
+      riskPct,
+      burnoutCount: diag.burnoutFlags.length,
+      mood: signal.mood || diag.responses.chat_mood || null,
+      riskBand: signal.riesgo || null
+    };
+    diag.lastSignal = {
+      at: new Date().toISOString(),
+      source: 'ai',
+      signal
+    };
+    if (record) {
+      persistDiagnosticFromSignal(signal, riskPct);
+    }
+  }
+  return applied;
+}
+
+async function persistDiagnosticFromSignal(signal, riskPct) {
+  if (!state.token || !state.sessionId || !state.user) return;
+  try {
+    const score = state.assessment.sentimentScore;
+    const label = diagnosticScoreToLabel(score);
+    const burnoutCount = state.assessment.burnoutFlags.length;
+    const flags = (state.assessment.flags || []).map(f => ({ level: f.tone, text: f.text }));
+    await api('/api/diagnostics', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: state.sessionId,
+        stepId: 'chat_signal',
+        stepLabel: 'Chat con IA',
+        score,
+        burnoutRisk: riskPct,
+        burnoutCount,
+        criticalDim: diagnosticCriticalDim(),
+        flowLabel: label.label,
+        flowTone: label.cls,
+        flags,
+        dims: { ...state.assessment.dims },
+        responses: state.assessment.responses,
+        createdAt: new Date().toISOString()
+      })
+    });
+  } catch (_error) {
+    // Ignorar errores de persistencia para no romper el chat.
+  }
+}
+
+function applyKeywordFallbackToAssessment(userMessage) {
+  if (!userMessage) return false;
+  const lv = String(userMessage).toLowerCase();
+  const burnoutHits = BURNOUT_KEYWORDS.filter(k => lv.includes(k));
+  const supportHits = SUPPORT_KEYWORDS.filter(k => lv.includes(k));
+  const distressHits = ['no puedo', 'me preocupa', 'me siento mal', 'ya no doy', 'no doy más', 'estoy mal', 'sin energía']
+    .filter(p => lv.includes(p));
+
+  const estres = clamp(5 - burnoutHits.length * 2 - distressHits.length, 1, 5);
+  const satisfaccion = clamp(3 + supportHits.length - burnoutHits.length, 1, 5);
+  const balance = clamp(4 - burnoutHits.length, 1, 5);
+  const carga = clamp(5 - Math.max(burnoutHits.length, distressHits.length), 1, 5);
+  const intencion_salida = clamp(5 - distressHits.length - burnoutHits.length, 1, 5);
+  const burnout = burnoutHits.length >= 3 ? 'severo' : burnoutHits.length >= 1 ? 'leve' : 'ninguno';
+  const mood = burnoutHits.length > supportHits.length ? 'negativo' : (supportHits.length > 0 ? 'positivo' : 'neutro');
+
+  const signal = {
+    estres,
+    satisfaccion,
+    balance,
+    carga,
+    intencion_salida,
+    burnout,
+    mood,
+    tags: [...new Set([...burnoutHits, ...distressHits, ...supportHits])].slice(0, 8)
+  };
+
+  const applied = applySignalToAssessment(signal, { record: true });
+  if (applied && state.assessment.lastSignal) {
+    state.assessment.lastSignal.source = 'keywords';
+    state.assessment.lastSignal.signal = signal;
+  }
+  return applied;
+}
+
+function rebuildAssessmentFromMessages(messages) {
+  resetDiagnostic();
+  if (!Array.isArray(messages) || !messages.length) return;
+  messages.forEach(message => {
+    if (message.role !== 'assistant' || !message.signal_json) return;
+    try {
+      const sig = JSON.parse(message.signal_json);
+      applySignalToAssessment(sig, { record: false });
+    } catch (_error) {
+      // señal malformada, ignorar
+    }
+  });
+  if (state.assessment.sentimentScore !== null) {
+    state.assessment.lastSignal = state.assessment.lastSignal || {
+      at: new Date().toISOString(),
+      source: 'history',
+      signal: null
+    };
+  }
 }
 
 function diagnosticAdvance(stepId) {
@@ -919,7 +1196,7 @@ function renderViewCards() {
       key: 'chat',
       eyebrow: 'VISTA 01',
       title: 'Chatbot privado',
-      text: 'Interacción asistida por Ollama, con sesión persistida y sin acceso anónimo.',
+      text: 'Conversación con Ollama que también clasifica tu estado de bienestar en tiempo real.',
       access: true
     },
     {
@@ -933,7 +1210,7 @@ function renderViewCards() {
       key: 'diagnostic',
       eyebrow: 'VISTA 03',
       title: 'Diagnóstico guiado',
-      text: 'Flujo original de bienestar, burnout y estado emocional en tiempo real.',
+      text: 'Flujo de 12 pasos con scoring, dimensiones y riesgo de rotación.',
       access: true
     },
     {
@@ -1020,33 +1297,40 @@ function renderChatView() {
         </div>
         <div class="panel-actions">
           <span class="chip">${escapeHtml(activeSessionLabel())}</span>
+          ${renderWellnessPill()}
+          <button class="ghost-btn" id="toggleWellnessPanelBtn" type="button">${state.wellnessPanelOpen ? 'Ocultar diagnóstico' : 'Ver diagnóstico'}</button>
           <button class="ghost-btn" id="newConversationBtn" type="button">Nueva conversación</button>
         </div>
       </div>
 
-      <div class="chat-stream" id="chatStream">
-        ${messages}
-        ${state.chatBusy ? `
-          <article class="message assistant typing-row">
-            <div class="avatar">IA</div>
-            <div class="bubble typing-bubble"><span></span><span></span><span></span></div>
-          </article>
-        ` : ''}
-      </div>
+      <div class="chat-layout ${state.wellnessPanelOpen ? 'with-side' : ''}">
+        <div class="chat-main">
+          <div class="chat-stream" id="chatStream">
+            ${messages}
+            ${state.chatBusy ? `
+              <article class="message assistant typing-row">
+                <div class="avatar">IA</div>
+                <div class="bubble typing-bubble"><span></span><span></span><span></span></div>
+              </article>
+            ` : ''}
+          </div>
 
-      <div class="quick-actions">
-        <button class="quick-chip" data-quick-message="Muéstrame las vistas disponibles del sistema.">Vistas disponibles</button>
-        <button class="quick-chip" data-quick-message="Resume el estado de mis sesiones y mensajes.">Resumen personal</button>
-        <button class="quick-chip" data-quick-message="Explícame cómo funciona el panel administrativo.">Cómo funciona admin</button>
-      </div>
+          <div class="quick-actions">
+            <button class="quick-chip" data-quick-message="Muéstrame las vistas disponibles del sistema.">Vistas disponibles</button>
+            <button class="quick-chip" data-quick-message="Resume el estado de mis sesiones y mensajes.">Resumen personal</button>
+            <button class="quick-chip" data-quick-message="Explícame cómo funciona el panel administrativo.">Cómo funciona admin</button>
+          </div>
 
-      <form id="chatForm" class="composer">
-        <textarea id="chatInput" name="message" rows="3" placeholder="Escribe aquí..." maxlength="4000" ${state.chatBusy ? 'disabled' : ''}></textarea>
-        <div class="composer-actions">
-          <span class="composer-hint">Todo mensaje queda ligado a tu usuario registrado.</span>
-          <button class="primary-btn" type="submit" ${state.chatBusy ? 'disabled' : ''}>Enviar</button>
+          <form id="chatForm" class="composer">
+            <textarea id="chatInput" name="message" rows="3" placeholder="Escribe aquí..." maxlength="4000" ${state.chatBusy ? 'disabled' : ''}></textarea>
+            <div class="composer-actions">
+              <span class="composer-hint">Todo mensaje queda ligado a tu usuario registrado.</span>
+              <button class="primary-btn" type="submit" ${state.chatBusy ? 'disabled' : ''}>Enviar</button>
+            </div>
+          </form>
         </div>
-      </form>
+        ${state.wellnessPanelOpen ? `<aside class="chat-side" id="wellnessSidePanel">${renderWellnessPanel()}</aside>` : ''}
+      </div>
     </section>
   `;
 }
@@ -1457,7 +1741,7 @@ function renderWorkspace() {
   let primary = '';
   if (view === 'chat') primary = renderChatView();
   if (view === 'me') primary = renderPersonalView();
-    if (view === 'diagnostic') primary = renderDiagnosticView();
+  if (view === 'diagnostic') primary = renderDiagnosticView();
   if (view === 'admin') primary = renderAdminView();
 
   return `
@@ -1568,6 +1852,23 @@ function bindEvents() {
   const newConversationBtn = document.getElementById('newConversationBtn');
   if (newConversationBtn) {
     newConversationBtn.addEventListener('click', startNewConversation);
+  }
+
+  const toggleWellnessPanelBtn = document.getElementById('toggleWellnessPanelBtn');
+  if (toggleWellnessPanelBtn) {
+    toggleWellnessPanelBtn.addEventListener('click', () => {
+      state.wellnessPanelOpen = !state.wellnessPanelOpen;
+      render();
+    });
+  }
+
+  const resetAssessmentBtn = document.getElementById('resetAssessmentBtn');
+  if (resetAssessmentBtn) {
+    resetAssessmentBtn.addEventListener('click', () => {
+      resetDiagnostic();
+      state.noticeMessage = 'Diagnóstico reiniciado. La próxima conversación empezará de cero.';
+      render();
+    });
   }
 
   document.querySelectorAll('[data-quick-message]').forEach(button => {
@@ -1815,9 +2116,16 @@ async function handleChatSend(event) {
       input.value = '';
     }
     state.draft = '';
+
+    if (result.signal) {
+      applySignalToAssessment(result.signal);
+    } else {
+      applyKeywordFallbackToAssessment(message);
+    }
+
     await hydratePrivateData();
     await loadSession(state.sessionId);
-    state.noticeMessage = 'Mensaje guardado en SQLite y respondido por el modelo.';
+    state.noticeMessage = 'Mensaje guardado en SQLite y clasificado.';
   } catch (error) {
     state.errorMessage = mapError(error);
   } finally {
@@ -1874,6 +2182,7 @@ async function loadSession(sessionId) {
   try {
     const response = await api(`/api/conversations/${sessionId}/messages`);
     state.chatMessages = response.messages || [];
+    rebuildAssessmentFromMessages(state.chatMessages);
   } catch (error) {
     state.errorMessage = mapError(error);
     state.chatMessages = [];
