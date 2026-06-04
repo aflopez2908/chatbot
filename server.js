@@ -161,6 +161,14 @@ async function main() {
   `);
   persistDb();
 
+  try {
+    run('ALTER TABLE messages ADD COLUMN signal_json TEXT');
+    persistDb();
+  } catch (_error) {
+    // La columna ya existe en bases de datos existentes.
+  }
+  persistDb();
+
   function count(tableName) {
     return get(`SELECT COUNT(*) AS total FROM ${tableName}`)?.total || 0;
   }
@@ -213,10 +221,10 @@ async function main() {
     run('UPDATE sessions SET updated_at = ? WHERE id = ?', [timestamp, sessionId]);
   }
 
-  function insertMessageRecord(sessionId, role, content, createdAt) {
+  function insertMessageRecord(sessionId, role, content, createdAt, signalJson = null) {
     return insert(
-      'INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)',
-      [sessionId, role, content, createdAt]
+      'INSERT INTO messages (session_id, role, content, created_at, signal_json) VALUES (?, ?, ?, ?, ?)',
+      [sessionId, role, content, createdAt, signalJson]
     );
   }
 
@@ -247,7 +255,7 @@ async function main() {
 
   function recentMessagesForSession(sessionId, limit = 10) {
     return all(
-      `SELECT role, content, created_at
+      `SELECT role, content, created_at, signal_json
        FROM messages
        WHERE session_id = ?
        ORDER BY id DESC
@@ -346,6 +354,63 @@ async function main() {
     };
   }
 
+  const SIGNAL_OPEN = '<<<SIGNAL>>>';
+  const SIGNAL_CLOSE = '<<<END>>>';
+
+  function extractSignal(rawText) {
+    const text = String(rawText || '');
+    const openIdx = text.indexOf(SIGNAL_OPEN);
+    if (openIdx === -1) return { reply: text, signal: null };
+    const closeIdx = text.indexOf(SIGNAL_CLOSE, openIdx + SIGNAL_OPEN.length);
+    if (closeIdx === -1) return { reply: text, signal: null };
+
+    const visible = (text.slice(0, openIdx) + text.slice(closeIdx + SIGNAL_CLOSE.length)).trim();
+    const jsonPart = text.slice(openIdx + SIGNAL_OPEN.length, closeIdx).trim();
+
+    let signal = null;
+    try {
+      const parsed = JSON.parse(jsonPart);
+      if (parsed && typeof parsed === 'object') {
+        signal = sanitizeSignal(parsed);
+      }
+    } catch (_error) {
+      signal = null;
+    }
+
+    return { reply: visible || text.trim(), signal };
+  }
+
+  function sanitizeSignal(value) {
+    const clamp = (n, min, max) => Math.max(min, Math.min(max, Math.round(n)));
+    const asInt = (raw, min, max) => {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return null;
+      return clamp(n, min, max);
+    };
+    const allowed = { burnout: ['ninguno', 'leve', 'moderado', 'severo'], mood: ['positivo', 'neutro', 'negativo'], riesgo: ['bajo', 'medio', 'alto'] };
+    const pickEnum = (raw, list) => {
+      const v = String(raw || '').toLowerCase().trim();
+      return list.includes(v) ? v : null;
+    };
+    const out = {
+      satisfaccion: asInt(value.satisfaccion ?? value.satisfaction, 1, 5),
+      estres: asInt(value.estres ?? value.stress, 1, 5),
+      carga: asInt(value.carga ?? value.workload, 1, 5),
+      liderazgo: asInt(value.liderazgo ?? value.leadership, 1, 5),
+      equipo: asInt(value.equipo ?? value.team, 1, 5),
+      crecimiento: asInt(value.crecimiento ?? value.growth, 1, 5),
+      remuneracion: asInt(value.remuneracion ?? value.pay, 1, 5),
+      balance: asInt(value.balance ?? value.worklife, 1, 5),
+      intencion_salida: asInt(value.intencion_salida ?? value.intention, 1, 5),
+      comunicacion: asInt(value.comunicacion ?? value.communication, 1, 5),
+      burnout: pickEnum(value.burnout, allowed.burnout),
+      mood: pickEnum(value.mood ?? value.animo, allowed.mood),
+      riesgo: pickEnum(value.riesgo ?? value.risk, allowed.riesgo),
+      tags: Array.isArray(value.tags) ? value.tags.slice(0, 8).map(tag => String(tag).slice(0, 40)) : []
+    };
+    return out;
+  }
+
   async function askOllama(messages) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 18000);
@@ -371,12 +436,12 @@ async function main() {
       }
 
       const data = await response.json();
-      const reply = cleanText(data?.message?.content || data?.response || '', 4000);
-      if (!reply) {
+      const raw = cleanText(data?.message?.content || data?.response || '', 4000);
+      if (!raw) {
         throw new Error('ollama_empty_response');
       }
 
-      return reply;
+      return extractSignal(raw);
     } finally {
       clearTimeout(timeout);
     }
@@ -587,7 +652,7 @@ async function main() {
     }
 
     const messages = all(`
-      SELECT role, content, created_at
+      SELECT role, content, created_at, signal_json
       FROM messages
       WHERE session_id = ?
       ORDER BY id ASC
@@ -633,25 +698,34 @@ async function main() {
         'Respondes en español con tono claro, profesional y cálido.',
         'Si el usuario pide ayuda sobre la plataforma, explica pasos concretos.',
         'Si el usuario comparte señales de riesgo emocional o burnout, ofrece apoyo y recomienda contactar a RRHH o a un responsable de bienestar.',
-        'No inventes datos de la empresa y evita respuestas largas innecesarias.'
-      ].join(' ')
+        'No inventes datos de la empresa y evita respuestas largas innecesarias.',
+        '',
+        'Adicionalmente, después de tu respuesta visible, debes incluir SIEMPRE un bloque de señal delimitado con los marcadores <<<SIGNAL>>> y <<<END>>>, con un objeto JSON válido y nada más dentro, con este esquema exacto:',
+        '{"satisfaccion":1-5,"estres":1-5,"carga":1-5,"liderazgo":1-5,"equipo":1-5,"crecimiento":1-5,"remuneracion":1-5,"balance":1-5,"intencion_salida":1-5,"comunicacion":1-5,"burnout":"ninguno|leve|moderado|severo","mood":"positivo|neutro|negativo","riesgo":"bajo|medio|alto","tags":["max8"]}',
+        'Las escalas son 1 (muy negativo) a 5 (muy positivo). El bloque de señal no debe mostrarse al usuario; el sistema lo extrae automáticamente.'
+      ].join('\n')
     };
 
-    let assistantMessage;
+    let assistantMessage = '';
+    let signal = null;
     try {
-      assistantMessage = await askOllama([systemPrompt, ...history]);
+      const ollamaResult = await askOllama([systemPrompt, ...history]);
+      assistantMessage = ollamaResult.reply;
+      signal = ollamaResult.signal;
     } catch (_error) {
       assistantMessage = fallbackReply(userMessage, req.auth.user);
     }
 
-    insertMessageRecord(sessionId, 'assistant', assistantMessage, nowIso());
+    const signalJson = signal ? JSON.stringify(signal) : null;
+    insertMessageRecord(sessionId, 'assistant', assistantMessage, nowIso(), signalJson);
     updateSessionTimestamp(sessionId, nowIso());
 
     res.json({
       sessionId,
       reply: assistantMessage,
       userMessage,
-      assistantRole: 'assistant'
+      assistantRole: 'assistant',
+      signal
     });
   });
 
